@@ -1,0 +1,153 @@
+---
+title: "PracticalMachineLearning_Prediction"
+author: "andhdo"
+date: "15 de noviembre de 2015"
+output: html_document
+---
+
+## Executive Summary
+Has been collected measures about particular activity for a set of people, using sensors (fuelband,filbit,jawboneup) to collect its body activity. 
+The goal is to predict the way in what they do excerciese using a machine learming model and examining 20 test cases. 
+Data for this project comes from this souce (Chapter WLE): <http://groupware.les.inf.puc-rio.br/har>.
+That gives the dataset of recorded activity in a set of Weight Lifting Excercises. Variable "classe" is the indictor of the exercise that was made and the way it was done (varying the performance of the excercise from class A to E being A the right way to do it, and the next 4 are common mistakes in doing that). We can use the other variables of the dataset to predict it.
+
+* Source Repo: <https://github.com/andhdo/coursera_dsc_08_pml_project.git>
+
+## Exploratory Data Analysis
+
+### Loading Data
+Some initialization activities are made to load the dataset and libraries from the referenced url. In order to reproduce it, you need to install those packages in R using the install.packages command
+
+```{r, echo=FALSE}
+# Libraries Inclusion ...
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+
+library(rattle)
+library(RGtk2)
+```
+
+```{r, echo=FALSE}
+# Data downloading ...
+
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./data/pml-training.csv"
+testFile  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile)
+}
+```
+
+```{r, echo=FALSE}
+# Data Reading ...
+
+trainRaw <- read.csv("./data/pml-training.csv")
+testRaw <- read.csv("./data/pml-testing.csv")
+```
+trainRaw and testRaw contains the values of the loaded data. They have the following dimensions (rows: observations ,columns: variables)
+
+```{r, echo=FALSE}
+dim(trainRaw)
+dim(testRaw)
+```
+
+### Preprocess the Data
+In this step we skip the observations with missing data and with NA values
+
+```{r}
+# obs with complete data:
+sum(complete.cases(trainRaw))
+
+# remove NA's
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0]
+
+# remove variables not related with accelerometer 
+# so that it does not interfer with the ML algorithms
+# then set back the dataset
+classe <- trainRaw$classe
+trainRemove <- grepl("^X|timestamp|window",names(trainRaw))
+trainRaw <- trainRaw[, !trainRemove]
+trainCleaned <- trainRaw[, sapply(trainRaw, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window",names(testRaw))
+testRaw <- testRaw[, !testRemove]
+testCleaned <- testRaw[, sapply(testRaw, is.numeric)]
+dim(trainCleaned)
+```
+
+### Split the data
+
+We split the trainging dataset (70% for pure trainign and 30% of the data to conduct cross vallidation)
+
+```{r}
+set.seed(22519) # For reproducibile purpose
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70,list=F)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+## Model Analysis: Using RandomForest
+We use RandomForest because it select automatically correlated variables. We use 5 folds cross validation.
+To build the model we use 'classe' variable as target preditor and the other ones as covariates
+
+```{r}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf",trControl=controlRf, ntree=250)
+modelRf
+```
+Then, we estimate the performance of the model on the validation data set.
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+```
+
+
+```{r}
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+```
+
+
+```{r}
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+So, the estimated accuracy of the model is 99.3% and the estimated out-of-sample error is 0.69%.
+
+## Model Usage: Predicting for TestData
+Now the model is applied to the downloaded testing dataset and print the result (for the 20 different test cases)
+
+```{r}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```
+
+## Appendix: Figures
+
+* Correlation matrix
+```{r fig.width=10, fig.height=10}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method="color")
+```
+
+* Decision Tree (1)
+```{r fig.width=10, fig.height=9}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel) # fast plot
+```
+
+* Decision Tree (2)
+```{r fig.width=10}
+fancyRpartPlot(treeModel)
+```
